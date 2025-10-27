@@ -1,56 +1,78 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { TILE_SIZE, COLS, ROWS, INITIAL_SNAKE, MOVE_INTERVAL } from "../game/constants";
 
 export default function GameBoard() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const tileSize = 20;
-  const cols = 30;
-  const rows = 20;
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const [snake, setSnake] = useState([{ x: 10, y: 10 }]);
-  const [direction, setDirection] = useState({ x: 1, y: 0 });
-  const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
+  const [snake, setSnake] = useState(INITIAL_SNAKE);
 
-  // Movimiento de la serpiente
+  // Refs para evitar re-renders
+  const directionRef = useRef({ x: 1, y: 0 });
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  // rAF timing refs
+  const lastTimeRef = useRef<number | null>(null);
+  const accumulatorRef = useRef(0);
+
+  // Movimiento: requestAnimationFrame con acumulador para respetar MOVE_INTERVAL
   useEffect(() => {
-    const interval = setInterval(() => {
-      setSnake(prev => {
-        const head = prev[0];
-        const newHead = {
-          x: (head.x + direction.x + cols) % cols,
-          y: (head.y + direction.y + rows) % rows,
-        };
-        return [newHead, ...prev.slice(0, -1)];
-      });
-    }, 150);
+    let rafId = 0;
 
-    return () => clearInterval(interval);
-  }, [direction]);
+    const step = (time: number) => {
+      if (lastTimeRef.current == null) lastTimeRef.current = time;
+      const dt = time - lastTimeRef.current;
+      lastTimeRef.current = time;
+
+      accumulatorRef.current += dt;
+
+      while (accumulatorRef.current >= MOVE_INTERVAL) {
+        setSnake(prev => {
+          const head = prev[0];
+          const dir = directionRef.current;
+          const newHead = {
+            x: (head.x + dir.x + COLS) % COLS,
+            y: (head.y + dir.y + ROWS) % ROWS,
+          };
+          return [newHead, ...prev.slice(0, -1)];
+        });
+        accumulatorRef.current -= MOVE_INTERVAL;
+      }
+
+      rafId = requestAnimationFrame(step);
+    };
+
+    rafId = requestAnimationFrame(step);
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, []);
 
   // Captura de teclado
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const dir = directionRef.current;
       switch (e.key) {
         case "ArrowUp":
-          if (direction.y === 0) setDirection({ x: 0, y: -1 });
+          if (dir.y === 0) directionRef.current = { x: 0, y: -1 };
           break;
         case "ArrowDown":
-          if (direction.y === 0) setDirection({ x: 0, y: 1 });
+          if (dir.y === 0) directionRef.current = { x: 0, y: 1 };
           break;
         case "ArrowLeft":
-          if (direction.x === 0) setDirection({ x: -1, y: 0 });
+          if (dir.x === 0) directionRef.current = { x: -1, y: 0 };
           break;
         case "ArrowRight":
-          if (direction.x === 0) setDirection({ x: 1, y: 0 });
+          if (dir.x === 0) directionRef.current = { x: 1, y: 0 };
           break;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [direction]);
+  }, []);
 
   // Captura de gestos táctiles
   useEffect(() => {
@@ -59,23 +81,25 @@ export default function GameBoard() {
 
     const handleTouchStart = (e: TouchEvent) => {
       const touch = e.touches[0];
-      setTouchStart({ x: touch.clientX, y: touch.clientY });
+      touchStartRef.current = { x: touch.clientX, y: touch.clientY };
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
-      if (!touchStart) return;
+      const start = touchStartRef.current;
+      if (!start) return;
       const touch = e.changedTouches[0];
-      const dx = touch.clientX - touchStart.x;
-      const dy = touch.clientY - touchStart.y;
+      const dx = touch.clientX - start.x;
+      const dy = touch.clientY - start.y;
+      const dir = directionRef.current;
 
       if (Math.abs(dx) > Math.abs(dy)) {
-        if (dx > 0 && direction.x === 0) setDirection({ x: 1, y: 0 });
-        else if (dx < 0 && direction.x === 0) setDirection({ x: -1, y: 0 });
+        if (dx > 0 && dir.x === 0) directionRef.current = { x: 1, y: 0 };
+        else if (dx < 0 && dir.x === 0) directionRef.current = { x: -1, y: 0 };
       } else {
-        if (dy > 0 && direction.y === 0) setDirection({ x: 0, y: 1 });
-        else if (dy < 0 && direction.y === 0) setDirection({ x: 0, y: -1 });
+        if (dy > 0 && dir.y === 0) directionRef.current = { x: 0, y: 1 };
+        else if (dy < 0 && dir.y === 0) directionRef.current = { x: 0, y: -1 };
       }
-      setTouchStart(null);
+      touchStartRef.current = null;
     };
 
     container.addEventListener("touchstart", handleTouchStart);
@@ -84,7 +108,7 @@ export default function GameBoard() {
       container.removeEventListener("touchstart", handleTouchStart);
       container.removeEventListener("touchend", handleTouchEnd);
     };
-  }, [touchStart, direction]);
+  }, []);
 
   // Dibujar tablero
   useEffect(() => {
@@ -92,16 +116,16 @@ export default function GameBoard() {
     const ctx = canvas?.getContext("2d");
 
     if (canvas && ctx) {
-      canvas.width = cols * tileSize;
-      canvas.height = rows * tileSize;
+      canvas.width = COLS * TILE_SIZE;
+      canvas.height = ROWS * TILE_SIZE;
 
       ctx.fillStyle = "#0f0f0f";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      for (let x = 0; x < cols; x++) {
-        for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < COLS; x++) {
+        for (let y = 0; y < ROWS; y++) {
           ctx.strokeStyle = "#1f1f1f";
-          ctx.strokeRect(x * tileSize, y * tileSize, tileSize, tileSize);
+          ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         }
       }
 
@@ -109,7 +133,7 @@ export default function GameBoard() {
       ctx.shadowColor = "#00ff7f";
       ctx.shadowBlur = 10;
       snake.forEach(segment => {
-        ctx.fillRect(segment.x * tileSize, segment.y * tileSize, tileSize, tileSize);
+        ctx.fillRect(segment.x * TILE_SIZE, segment.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
       });
       ctx.shadowBlur = 0;
     }
@@ -123,7 +147,7 @@ export default function GameBoard() {
       <canvas
         ref={canvasRef}
         className="rounded-xl shadow-2xl border border-neutral-800 max-w-full h-auto"
-        style={{ maxWidth: cols * tileSize, height: rows * tileSize }}
+        style={{ maxWidth: COLS * TILE_SIZE, height: ROWS * TILE_SIZE }}
       />
     </div>
   );
